@@ -436,16 +436,16 @@ async fn zip_requeue_node_responses_score_peer(
     if request.requests.len() < nodes_size {
         *failed_downloads += 1;
         peer_handler
-            .peer_scores
-            .lock()
-            .await
-            .record_failure(request.peer_id);
-        warn!(
-            "Peer {} sent more nodes than requested ({} > {}); ignoring extras",
-            request.peer_id,
-            nodes_size,
-            request.requests.len()
-        );
+            .record_failure(
+                request.peer_id,
+                &format!(
+                    "Peer {} sent more nodes than requested ({} > {}); ignoring extras",
+                    request.peer_id,
+                    nodes_size,
+                    request.requests.len()
+                ),
+            )
+            .await;
         // Defensive handling: continue processing; extra nodes will be dropped by the zip below.
     }
 
