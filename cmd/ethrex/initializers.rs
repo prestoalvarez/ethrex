@@ -42,8 +42,7 @@ use tracing_subscriber::{
 pub fn init_tracing(opts: &Options) -> reload::Handle<EnvFilter, Registry> {
     let log_filter = EnvFilter::builder()
         .with_default_directive(Directive::from(opts.log_level))
-        .from_env_lossy()
-        .add_directive(Directive::from(opts.log_level));
+        .from_env_lossy();
 
     let (filter, filter_handle) = reload::Layer::new(log_filter);
 
@@ -103,13 +102,15 @@ pub fn open_store(data_dir: &str) -> Store {
         Store::new(data_dir, EngineType::InMemory).expect("Failed to create Store")
     } else {
         cfg_if::cfg_if! {
-            if #[cfg(feature = "libmdbx")] {
+            if #[cfg(feature = "rocksdb")] {
+                let engine_type = EngineType::RocksDB;
+            } else if #[cfg(feature = "libmdbx")] {
                 let engine_type = EngineType::Libmdbx;
             } else {
-                error!("No database specified. The feature flag `libmdbx` should've been set while building.");
+                error!("No database specified. The feature flag `rocksdb` or `libmdbx` should've been set while building.");
                 panic!("Specify the desired database engine.");
             }
-        }
+        };
         Store::new(data_dir, engine_type).expect("Failed to create Store")
     }
 }
@@ -137,6 +138,7 @@ pub async fn init_rpc_api(
     cancel_token: CancellationToken,
     tracker: TaskTracker,
     log_filter_handler: Option<reload::Handle<EnvFilter, Registry>>,
+    gas_ceil: Option<u64>,
 ) {
     // Create SyncManager
     let syncer = SyncManager::new(
@@ -161,6 +163,7 @@ pub async fn init_rpc_api(
         peer_handler,
         get_client_version(),
         log_filter_handler,
+        gas_ceil,
     );
 
     tracker.spawn(rpc_api);
@@ -200,7 +203,9 @@ pub async fn init_network(
         blockchain.clone(),
         get_client_version(),
         based_context,
-    );
+    )
+    .await
+    .expect("P2P context could not be created");
 
     ethrex_p2p::start_network(context, bootnodes)
         .await
@@ -209,7 +214,6 @@ pub async fn init_network(
     tracker.spawn(ethrex_p2p::periodically_show_peer_stats(
         blockchain,
         peer_handler.peer_table.peers.clone(),
-        peer_handler.peer_scores,
     ));
 }
 
@@ -414,6 +418,8 @@ pub async fn init_l1(
         cancel_token.clone(),
         tracker.clone(),
         log_filter_handler,
+        // TODO (#4482): Make this configurable.
+        None,
     )
     .await;
 
